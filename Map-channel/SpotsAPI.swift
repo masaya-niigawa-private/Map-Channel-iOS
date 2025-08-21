@@ -106,6 +106,7 @@ struct SpotsAPI {
         struct SpotNode: Decodable { let posts: [APIPost]? }
         let spot: SpotNode?
     }
+    
     private struct SpotEnvelope: Decodable { let posts: [APIPost]? }
     
     static func fetchPosts(spotID: Int) async throws -> [APIPost] {
@@ -290,7 +291,6 @@ struct SpotsAPI {
     }
     
     // ====== ★ ここから修正・削除 API 追加 ======
-    
     /// 共通: 2xx なら OK を返す
     private static func is2xx(_ resp: URLResponse?) -> Bool {
         guard let http = resp as? HTTPURLResponse else { return false }

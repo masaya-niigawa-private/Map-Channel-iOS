@@ -101,7 +101,7 @@ struct SpotDetailSheet: View {
                 // リードコメント
                 if let lead = leadCommentText {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("コメント")
+                        Text("詳細情報")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Text(lead)

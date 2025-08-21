@@ -125,7 +125,7 @@ struct RegisterSpotSheet: View {
                                     .stroke(Color(UIColor.separator), lineWidth: 0.5)
                             )
                     } label: {
-                        Label("コメント", systemImage: "text.bubble")
+                        Label("詳細情報", systemImage: "text.bubble")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
