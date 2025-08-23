@@ -85,18 +85,28 @@ struct SpotDetailSheet: View {
                 }
                 
                 // アクション
-                HStack(spacing: 12) {
-                    ActionButton(title: "コメントを書く", systemName: "text.bubble") {
+                HStack(spacing: 8) {
+                    ActionButton(title: "コメントする",
+                                 systemName: "text.bubble",
+                                 kind: .primary,
+                                 fullWidth: true) {
                         isPresentingCommentComposer = true
                     }
-                    ActionButton(title: "修正する", systemName: "square.and.pencil") {
+                    ActionButton(title: "修正する",
+                                 systemName: "square.and.pencil",
+                                 kind: .secondary,
+                                 fullWidth: true) {
                         showEdit = true
                     }
-                    Spacer()
-                    ActionButton(title: "削除", systemName: "trash") {
+                    ActionButton(title: "削除",
+                                 systemName: "trash",
+                                 kind: .destructive,
+                                 fullWidth: true) {
                         showDeleteConfirm = true
                     }
                 }
+                .padding(.vertical, 2) // 周囲のレイアウトに応じて微調整
+                
                 
                 // リードコメント
                 if let lead = leadCommentText {
@@ -326,23 +336,6 @@ private extension SpotDetailSheet {
                 }
             }
         }
-    }
-}
-
-private struct ActionButton: View {
-    let title: String
-    let systemName: String
-    let action: () -> Void
-    var body: some View {
-        Button(action: action) {
-            Label(title, systemImage: systemName)
-                .labelStyle(.titleAndIcon)
-                .font(.subheadline.weight(.semibold))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color.accentColor.opacity(0.12), in: Capsule())
-        }
-        .buttonStyle(.plain)
     }
 }
 

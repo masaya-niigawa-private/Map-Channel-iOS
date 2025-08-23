@@ -11,7 +11,7 @@ import SwiftUI
 struct Map_channelApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
         }
     }
 }

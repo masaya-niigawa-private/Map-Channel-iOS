@@ -35,7 +35,7 @@ struct SpotsMapView: View {
                     // Map本体（軽量ラッパー）
                     SpotsMap(
                         coordinateRegion: $region,
-                        showsUserLocation: true,
+                        showsUserLocation: false,
                         spots: vm.spots
                     ) { tapped in
                         selectedSpot = tapped
