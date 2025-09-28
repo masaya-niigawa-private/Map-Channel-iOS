@@ -2,8 +2,6 @@ import SwiftUI
 import Foundation
 
 // =====================================================
-// MARK: - メイン（掲示板）ビュー
-// =====================================================
 struct KeizibanView: View {
     @State private var selectedPrimary: KZBPrimary = .latest
     @State private var showingNewPost = false
@@ -16,7 +14,7 @@ struct KeizibanView: View {
         } else {
             _vm = StateObject(
                 wrappedValue: BoardsViewModel(
-                    kzbService: BoardsAPI(baseURL: URL(string: "https://example.com/api/v1")!)
+                    kzbService: BoardsAPI(baseURL: URL(string: "https://map-ch.com/api/v1")!)
                 )
             )
         }
@@ -73,21 +71,26 @@ struct KeizibanView: View {
                 }
             }
             
-            // ===== 新規投稿ウィンドウ（見た目据え置き）=====
+            // ===== 新規投稿ウィンドウ =====
             if showingNewPost {
                 Color.black.opacity(0.35).ignoresSafeArea()
                     .transition(.opacity).zIndex(10)
                 
-                KZBNewPostView(isPresented: $showingNewPost)
-                    .frame(maxWidth: 680)
-                    .padding(.horizontal, 18)
-                    .transition(.scale.combined(with: .opacity))
-                    .zindexIfNeeded(11)
+                // 投稿 → VM 経由で API を叩く
+                KZBNewPostView(isPresented: $showingNewPost) { form in
+                    Task { await vm.submitNewPost(form: form) }
+                }
+                .frame(maxWidth: 680)
+                .padding(.horizontal, 18)
+                .transition(.scale.combined(with: .opacity))
+                .zindexIfNeeded(11)
             }
         }
         .task {
             // 初回ロード
             await vm.load(sort: selectedPrimary.toSort, categoryId: nil)
+            // カテゴリ名称→ID解決用のキャッシュ
+            await vm.ensureCategoriesLoaded()
         }
         .alert(item: $vm.alert) { a in
             Alert(title: Text("エラー"), message: Text(a.message), dismissButton: .default(Text("OK")))
@@ -175,7 +178,7 @@ private extension KZBPrimary {
 }
 
 // =====================================================
-// MARK: - PostCardView / NewPostView / 小物（既存そのまま）
+// MARK: - PostCardView / 小物（既存そのまま）
 // =====================================================
 struct PostCardView: View {
     private struct CardData {
@@ -212,8 +215,7 @@ struct PostCardView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            
-            // ===== 画像（上段） =====
+            // 画像（上段）
             ZStack(alignment: .topTrailing) {
                 LinearGradient(
                     gradient: Gradient(colors: [Color.kzb("#8E7CC3"), Color.kzb("#6B5B95")]),
@@ -249,16 +251,14 @@ struct PostCardView: View {
             .frame(height: 220)
             .clipShape(KZBRoundedRect(topLeft: 22, topRight: 22, bottomLeft: 0, bottomRight: 0))
             
-            // ===== 本文（下段：白いカード） =====
+            // 本文（下段）
             VStack(alignment: .leading, spacing: 14) {
-                // 本文
                 Text(d.content)
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundColor(Color(.label))
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
                 
-                // 位置（ピン）
                 HStack(spacing: 6) {
                     Text("📍")
                     Text(d.locationName)
@@ -266,7 +266,6 @@ struct PostCardView: View {
                         .foregroundColor(Color.kzb("#3676FF"))
                 }
                 
-                // いいね / 閲覧数 と 「詳細」
                 HStack {
                     HStack(spacing: 6) {
                         Image(systemName: "heart")
@@ -299,9 +298,7 @@ struct PostCardView: View {
                 
                 Divider()
                 
-                // 著者行 + お気に入り
                 HStack {
-                    // アバター（頭文字）
                     ZStack {
                         Circle()
                             .fill(LinearGradient(
@@ -357,39 +354,32 @@ struct PostCardView: View {
 
 // Color.kzb("#RRGGBB", alpha:)
 extension Color {
-    /// 例: Color.kzb("#1E90FF"), Color.kzb("1E90FF", alpha: 0.8), Color.kzb("FF0000")
     static func kzb(_ hex: String, alpha: Double = 1.0) -> Color {
-        // 前後空白/接頭辞を除去
         let s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "#", with: "")
             .replacingOccurrences(of: "0x", with: "")
             .uppercased()
-        
-        func d(_ ss: Substring) -> Double {
-            Double(Int(ss, radix: 16) ?? 0) / 255.0
-        }
-        
+        func d(_ ss: Substring) -> Double { Double(Int(ss, radix: 16) ?? 0) / 255.0 }
         switch s.count {
-        case 3: // RGB (12-bit, e.g. F0A)
+        case 3:
             let r = String(repeating: s[s.startIndex], count: 2)
             let g = String(repeating: s[s.index(s.startIndex, offsetBy: 1)], count: 2)
             let b = String(repeating: s[s.index(s.startIndex, offsetBy: 2)], count: 2)
             return Color(.sRGB,
                          red: d(Substring(r)), green: d(Substring(g)), blue: d(Substring(b)),
                          opacity: alpha)
-        case 6: // RRGGBB
+        case 6:
             let r = d(s.prefix(2))
             let g = d(s.dropFirst(2).prefix(2))
             let b = d(s.dropFirst(4).prefix(2))
             return Color(.sRGB, red: r, green: g, blue: b, opacity: alpha)
-        case 8: // AARRGGBB
+        case 8:
             let a = d(s.prefix(2))
             let r = d(s.dropFirst(2).prefix(2))
             let g = d(s.dropFirst(4).prefix(2))
             let b = d(s.dropFirst(6).prefix(2))
             return Color(.sRGB, red: r, green: g, blue: b, opacity: a)
         default:
-            // フォールバック（黒）
             return Color(.sRGB, red: 0, green: 0, blue: 0, opacity: alpha)
         }
     }
@@ -442,50 +432,85 @@ struct KZBRoundedRect: InsettableShape {
     }
 }
 
-// zindexIfNeeded（呼び出し側の既存シグネチャに合わせて2種類を用意）
+// zindexIfNeeded
 extension View {
-    /// 例: .zindexIfNeeded(11)
-    func zindexIfNeeded(_ value: Double) -> some View {
-        self.zIndex(value)
-    }
-    /// 例: .zindexIfNeeded(isFront, value: 1000)
-    func zindexIfNeeded(_ enabled: Bool, value: Double = 1000) -> some View {
-        self.zIndex(enabled ? value : 0)
-    }
+    func zindexIfNeeded(_ value: Double) -> some View { self.zIndex(value) }
+    func zindexIfNeeded(_ enabled: Bool, value: Double = 1000) -> some View { self.zIndex(enabled ? value : 0) }
 }
 
-#if DEBUG
-/// プレビュー専用のモック
-final class MockBoardsService: BoardsService {
-    func fetchBoards(
-        sort: BoardSort,
-        categoryId: Int?,
-        page: Int,
-        perPage: Int
-    ) async throws -> PagedResponse<BoardDTO> {
-        let items: [BoardDTO] = (0..<6).map { i in
-            BoardDTO(
-                id: i + 1,
-                description: "プレビュー用の投稿 \(i + 1)（\(sort.rawValue)）",
-                location: .init(name: "千里山キャンパス", lat: 34.77, lng: 135.51),
-                favorite_count: Int.random(in: 0..<50),
-                view_count: Int.random(in: 50..<999),
-                author: .init(id: nil, uid: nil, name: "User \(i + 1)"),
-                category: .init(id: 1, name: "サークル募集", sort_order: 1),
-                created_at: "2025-09-01T12:00:00Z",
-                is_favorited: false,
-                photo_url: nil
-            )
-        }
-        return .init(data: items, meta: .init(page: page, per_page: perPage, total: 60))
-    }
-}
+//#if DEBUG
+///// プレビュー専用のモック
+//final class MockBoardsService: BoardsService, BoardsCategoriesService, BoardsCreateService {
+//    func fetchBoards(
+//        sort: BoardSort,
+//        categoryId: Int?,
+//        page: Int,
+//        perPage: Int
+//    ) async throws -> PagedResponse<BoardDTO> {
+//        let items: [BoardDTO] = (0..<6).map { i in
+//            BoardDTO(
+//                id: i + 1,
+//                description: "プレビュー用の投稿 \(i + 1)（\(sort.rawValue)）",
+//                location: .init(name: "千里山キャンパス", lat: 34.77, lng: 135.51),
+//                favorite_count: Int.random(in: 0..<50),
+//                view_count: Int.random(in: 50..<999),
+//                author: .init(id: nil, uid: nil, name: "User \(i + 1)"),
+//                category: .init(id: 1, name: "サークル募集", sort_order: 1),
+//                created_at: ISO8601DateFormatter().string(from: Date()),
+//                is_favorited: false,
+//                photo_url: nil
+//            )
+//        }
+//        return .init(data: items, meta: .init(page: page, per_page: perPage, total: 60))
+//    }
+//
+//    // カテゴリ一覧（名称→ID 突合用）
+//    func fetchCategories() async throws -> [BoardDTO.Category] {
+//        return [
+//            .init(id: 1, name: "サークル募集", sort_order: 1),
+//            .init(id: 2, name: "就活情報", sort_order: 2),
+//            .init(id: 3, name: "イベント", sort_order: 3),
+//            .init(id: 4, name: "バイト求人", sort_order: 4),
+//            .init(id: 5, name: "IT便利ツール", sort_order: 5),
+//            .init(id: 6, name: "関大インフルエンサー", sort_order: 6),
+//            .init(id: 99, name: "その他", sort_order: 999)
+//        ]
+//    }
+//
+//    // 新規作成（プレビュー用ダミー）
+//    func createBoard(categoryId: Int, description: String,
+//                     linkURL: String?, locationName: String?,
+//                     locationLat: Double?, locationLng: Double?,
+//                     photo: BoardPhoto?) async throws -> BoardDTO {
+//        return BoardDTO(
+//            id: Int.random(in: 1000...9999),
+//            description: description,
+//            location: .init(name: locationName, lat: locationLat, lng: locationLng),
+//            favorite_count: 0,
+//            view_count: 0,
+//            author: .init(id: nil, uid: nil, name: "You"),
+//            category: .init(id: categoryId, name: "その他", sort_order: nil),
+//            created_at: ISO8601DateFormatter().string(from: Date()),
+//            is_favorited: false,
+//            photo_url: nil
+//        )
+//    }
+//}
+//
+///// KeizibanView のプレビュー
+//struct KeizibanView_Previews: PreviewProvider {
+//    static var previews: some View {
+//        KeizibanView(vm: BoardsViewModel(kzbService: MockBoardsService()))
+//            .previewDisplayName("KeizibanView / Mock")
+//    }
+//}
+//#endif
 
-/// KeizibanView のプレビュー
-struct KeizibanView_Previews: PreviewProvider {
-    static var previews: some View {
-        KeizibanView(vm: BoardsViewModel(kzbService: MockBoardsService()))
-            .previewDisplayName("KeizibanView / Mock")
-    }
+// 実APIで動かしたい Preview（Mock 不使用）
+#Preview("KeizibanView / Live API") {
+    let api = BoardsAPI(
+        baseURL: URL(string: "https://map-ch.com/api/v1")!
+    )
+    let vm = BoardsViewModel(kzbService: api)
+    KeizibanView(vm: vm)   // ← 最後の式をそのまま置く
 }
-#endif

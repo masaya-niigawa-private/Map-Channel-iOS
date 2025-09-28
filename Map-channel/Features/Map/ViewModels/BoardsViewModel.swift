@@ -6,12 +6,31 @@ import Foundation
 import SwiftUI
 
 // ===== KZB が無い環境用のブリッジ =====
-// ※ プロジェクトに KZBBoardsService / KZBBoardSort が「存在しない」場合のみ有効。
-//   もし別ファイルで KZB* を定義しているなら、この 3 行は削除してください。
 typealias KZBBoardsService = BoardsService
 typealias KZBBoardSort = BoardSort
 typealias KZBBoardDTO = BoardDTO
 // =====================================
+
+// MARK: - Service 拡張用プロトコル（POST /boards, GET /categories）
+public struct BoardPhoto {
+    public let data: Data
+    public let filename: String
+    public let mimeType: String
+    public init(data: Data, filename: String, mimeType: String) {
+        self.data = data; self.filename = filename; self.mimeType = mimeType
+    }
+}
+
+public protocol BoardsCategoriesService {
+    func fetchCategories() async throws -> [BoardDTO.Category]
+}
+
+public protocol BoardsCreateService {
+    func createBoard(categoryId: Int, description: String,
+                     linkURL: String?, locationName: String?,
+                     locationLat: Double?, locationLng: Double?,
+                     photo: BoardPhoto?) async throws -> BoardDTO
+}
 
 // MARK: - KUChannelView 用の表示モデル
 public struct BoardRow: Identifiable {
@@ -90,13 +109,16 @@ final class BoardsViewModel: ObservableObject {
     private var currentSort: BoardSort = .latest
     private var currentCategoryId: Int?
     
+    // カテゴリキャッシュ（名称→ID）
+    private var categoryByName: [String: Int] = [:]
+    
     // —— KUChannelView：BoardsService を使用
     init(service: BoardsService) {
         self.boardsService = service
         self.kzbService = nil
     }
     
-    // —— KeizibanView：KZBBoardsService を使用（なければ上の typealias で BoardsService と同義）
+    // —— KeizibanView：KZBBoardsService を使用
     init(kzbService: KZBBoardsService) {
         self.boardsService = nil
         self.kzbService = kzbService
@@ -138,7 +160,7 @@ final class BoardsViewModel: ObservableObject {
                 rows = reset ? newRows : (rows + newRows)
                 
             } else if let svc = kzbService {
-                // —— KeizibanView 経路：KZBBoardDTO → BoardPost
+                // —— KeizibanView 経路
                 let paged = try await svc.fetchBoards(
                     sort: KZBBoardSort(rawValue: currentSort.rawValue) ?? .latest,
                     categoryId: currentCategoryId,
@@ -169,4 +191,89 @@ final class BoardsViewModel: ObservableObject {
             alert = .init(message: error.localizedDescription)
         }
     }
+    
+    // ========== ここから投稿実装 ==========
+    /// カテゴリ一覧（名称→ID）の lazy ロード
+    func ensureCategoriesLoaded() async {
+        guard categoryByName.isEmpty else { return }
+        do {
+            if let svc = (boardsService as? BoardsCategoriesService) ?? (kzbService as? BoardsCategoriesService) {
+                let cs = try await svc.fetchCategories()
+                categoryByName = Dictionary(uniqueKeysWithValues: cs.map { ($0.name, $0.id) })
+            }
+        } catch {
+            // ここで失敗しても投稿時に再取得を試みる
+        }
+    }
+    
+    /// 新規投稿 → POST /boards → 成功時に一覧へ即反映
+    func submitNewPost(form: KZBNewPostForm) async {
+        let desc = form.descriptionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !desc.isEmpty else {
+            alert = .init(message: "説明文を入力してください")
+            return
+        }
+        
+        do {
+            isLoading = true
+            defer { isLoading = false }
+            
+            // カテゴリID解決（未ロードならここで取得）
+            if categoryByName.isEmpty {
+                await ensureCategoriesLoaded()
+            }
+            guard let catName = form.category,
+                  let catId = categoryByName[catName] ?? categoryByName.values.sorted().first
+            else {
+                throw NSError(domain: "BoardsViewModel", code: -2,
+                              userInfo: [NSLocalizedDescriptionKey: "カテゴリを選択してください"])
+            }
+            
+            // 画像 MIME/拡張子の推定（jpeg/png/webp）
+            var photo: BoardPhoto? = nil
+            if let data = form.photoData, !data.isEmpty {
+                let mime: String
+                let filename: String
+                if data.starts(with: [0xFF, 0xD8, 0xFF]) { mime = "image/jpeg"; filename = "photo.jpg" }
+                else if data.starts(with: [0x89, 0x50, 0x4E, 0x47]) { mime = "image/png"; filename = "photo.png" }
+                else if data.count >= 12,
+                        String(data: data[8..<12], encoding: .ascii) == "WEBP" { mime = "image/webp"; filename = "photo.webp" }
+                else { mime = "image/jpeg"; filename = "photo.jpg" } // サーバ側の image バリデーション対策
+                photo = BoardPhoto(data: data, filename: filename, mimeType: mime)
+            }
+            
+            // Service が投稿APIを実装している方を使う
+            if let svc = (boardsService as? BoardsCreateService) ?? (kzbService as? BoardsCreateService) {
+                let dto = try await svc.createBoard(
+                    categoryId: catId,
+                    description: desc,
+                    linkURL: form.link.isEmpty ? nil : form.link,
+                    locationName: form.pin,
+                    locationLat: nil,
+                    locationLng: nil,
+                    photo: photo
+                )
+                
+                // 成功 → 先頭に反映
+                let created = BoardPost(
+                    content: dto.description,
+                    location: dto.location.name ?? "",
+                    likes: dto.favorite_count,
+                    views: dto.view_count,
+                    authorName: dto.author.name,
+                    authorInitial: String(dto.author.name.prefix(1)),
+                    authorTag: dto.category.name,
+                    timeAgo: BoardRow.relative(dto.created_at)
+                )
+                posts.insert(created, at: 0)
+                
+            } else {
+                throw NSError(domain: "BoardsViewModel", code: -3,
+                              userInfo: [NSLocalizedDescriptionKey: "投稿APIが未実装（BoardsAPI 側に createBoard を実装してください）"])
+            }
+        } catch {
+            alert = .init(message: error.localizedDescription)
+        }
+    }
 }
+
